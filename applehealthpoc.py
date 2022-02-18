@@ -1,11 +1,14 @@
 from applehealth import AppleHealth
 import numpy as np
 
-ah = AppleHealth()
+ah = AppleHealth(readCache = True, writeCache = True)
 # ah.resampleWorkouts({'duration' : np.mean})
 ah.workoutTrends('Soccer')
 ah.resampleRecords({'BodyMass' : np.mean, 'DistanceWalkingRunning' : sum, 'StepCount' : sum, 'HeartRateVariabilitySDNN': np.mean, 'RestingHeartRate' : np.mean, 'AppleExerciseTime' : sum})
 # ah.resampleWorkouts({'BodyMass' : np.mean, 'DistanceWalkingRunning' : sum, 'StepCount' : sum, 'HeartRateVariabilitySDNN': np.mean, 'RestingHeartRate' : np.mean, 'AppleExerciseTime' : sum})
+ah.extractWorkoutType('Soccer', 'soccer.csv')
+ah.sleepRecord()
+ah.sleepAnalysis()
 print(ah.record_df)
 ah.timeSeries('DistanceWalkingRunning')
 ah.heatMap()
