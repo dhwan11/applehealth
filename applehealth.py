@@ -5,6 +5,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import calendar
 import time
+from datetime import datetime
+import pytz
 
 # an instance of apple Health
 # fname is the name of data file to be parsed must be an XML files
@@ -77,6 +79,8 @@ class AppleHealth:
         s = time.time()
         self.pivot_record_df = self.record_data.pivot_table(index='endDate', columns='type', values='value')
         self.pivot_workout_df = self.workout_data.pivot_table(index='endDate', columns='workoutActivityType', values=['duration', 'totalDistance', 'totalEnergyBurned'])
+        # self.pivot_record_df.tz_convert('UTC', level=0)
+        # self.pivot_workout_df.tz_convert('UTC', level=0)
         print(self.pivot_workout_df)
         # print(self.pivot_workout_df.xs('Soccer'))
         print()
@@ -198,3 +202,48 @@ class AppleHealth:
     def readCache(self):
         self.pivot_record_df = pd.read_pickle('cached_pivot_record_df.pkl')
         self.pivot_workout_df = pd.read_pickle('cached_pivot_workout_df.pkl')
+
+    # investigate use case
+    # TODO: Test
+    def dropNullRecord(self, subset = None, thresh = 0.0, axis = 0, inplace=False):
+        print(int( 0.000001 * self.pivot_record_df.shape[0]))
+        return self.pivot_record_df.dropna(thresh  = int(thresh * len(self.pivot_record_df.index)), axis = axis , inplace = inplace, subset = subset)
+
+    # compress records over period into 1 record by calculating mean of each record collected
+    # TODO: Test
+    def compressRecord(self, period = '5T'):
+        return self.pivot_record_df.resample(period).mean()
+
+    # find the delta between each record collected
+    def avgRecordFreq(self):
+        return self.pivot_record_df.index.to_series().diff().mean()
+
+    # find standard deviation of all records
+    def standardDeviationRecord(self):
+        return self.pivot_record_df.std()
+
+    # find standard deviation of all metrics between workouts
+    def standardDeviationWorkout(self):
+        return self.pivot_workout_df.std()
+
+    # find average energy burned for specific workout_type
+    # TODO: Rename
+    def workoutAvgEnergyBurnedPerMin(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].sum() / self.pivot_workout_df['duration'][workout_type].sum()
+
+    # find average distance traveled for specific workout_type
+    # TODO: Rename
+    def workoutAvgDistancePerMin(self, workout_type):
+        return self.pivot_workout_df['totalDistance'][workout_type].sum() / self.pivot_workout_df['duration'][workout_type].sum()
+
+    def findWorkoutByTime(self, time):
+        time = pd.Timestamp(time, tz=pytz.FixedOffset(-240))
+        print(time.tzinfo)
+        print(self.pivot_workout_df.index.tzinfo)
+        return self.pivot_workout_df.index[self.pivot_workout_df.index.get_loc(time, method='nearest')].strftime('%Y-%m-%d %H:%M:%S')
+
+    def findRecordByTime(self, time):
+        time = pd.Timestamp(time, tz=pytz.FixedOffset(-240))
+        print(time.tzinfo)
+        print(self.pivot_record_df.index.tzinfo)
+        return self.pivot_record_df.index[self.pivot_record_df.index.get_loc(time, method='nearest')].strftime('%Y-%m-%d %H:%M:%S')
