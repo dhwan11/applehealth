@@ -7,7 +7,7 @@ import calendar
 import time
 from datetime import datetime
 import pytz
-
+from scipy import stats
 # an instance of apple Health
 # fname is the name of data file to be parsed must be an XML files
 # flags for cache
@@ -39,7 +39,6 @@ class AppleHealth:
         s = time.time()
         self.record_data = pd.DataFrame(record_list)
         self.workout_data = pd.DataFrame(workout_list)
-        print(self.workout_data)
         e = time.time()
         print("creating DF Time = {}".format(e-s))
 
@@ -71,7 +70,6 @@ class AppleHealth:
         self.record_data['type'] = self.record_data['type'].str.replace('HKQuantityTypeIdentifier', '')
         self.record_data['type'] = self.record_data['type'].str.replace('HKCategoryTypeIdentifier', '')
         self.workout_data['workoutActivityType'] = self.workout_data['workoutActivityType'].str.replace('HKWorkoutActivityType', '')
-        print(self.workout_data)
         e = time.time()
         print("rest Time = {}".format(e-s))
 
@@ -79,11 +77,6 @@ class AppleHealth:
         s = time.time()
         self.pivot_record_df = self.record_data.pivot_table(index='endDate', columns='type', values='value')
         self.pivot_workout_df = self.workout_data.pivot_table(index='endDate', columns='workoutActivityType', values=['duration', 'totalDistance', 'totalEnergyBurned'])
-        # self.pivot_record_df.tz_convert('UTC', level=0)
-        # self.pivot_workout_df.tz_convert('UTC', level=0)
-        print(self.pivot_workout_df)
-        # print(self.pivot_workout_df.xs('Soccer'))
-        print()
         e = time.time()
         print("pivot Time = {}".format(e-s))
 
@@ -92,22 +85,24 @@ class AppleHealth:
 
     # resample the record dataframe to period and perform calculations to metrics listed in dict
     def resampleRecords(self, resampDict, period = 'D'):
-        self.record_df = self.pivot_record_df.resample(period).agg(resampDict)
+        self.pivot_record_df = self.pivot_record_df.resample(period).agg(resampDict)
+        return self.pivot_record_df
 
     # resample the workout dataframe to period and perform calculations to metrics listed in dict
     def resampleWorkouts(self, resampDict, period = 'D'):
-        self.workout_df = self.pivot_workout_df.resample(period).agg(resampDict)
+        self.pivot_workout_df = self.pivot_workout_df.resample(period).agg(resampDict)
+        return self.pivot_workout_df
 
     # calculate the delta of deltaCol
     # TODO: Test
-    def delta(self, deltaCol):
-        self.record_df['Delta'] = df[deltaCol].diff()
+    # def delta(self, deltaCol):
+    #     self.record_df['Delta'] = df[deltaCol].diff()
 
     # display a time time series of the provided timeSeriesCol
     # TODO: allow for selecting of range of dates
     def timeSeries(self, timeSeriesCol, col = 'purple', lw = 1, fsx = 12, fsy = 4):
         fig = plt.figure(figsize=(fsx,fsy))
-        sns.lineplot(data=self.record_df[timeSeriesCol], color=col, linewidth=lw)
+        sns.lineplot(data=self.pivot_record_df[timeSeriesCol], color=col, linewidth=lw)
         plt.show()
 
     # display workout trends of selected workout ployyed with metrics
@@ -119,13 +114,13 @@ class AppleHealth:
     # returns a correlation matrix of the record dataframe
     def correlationMatrix(self):
         # correlation matrix
-        self.cm = self.record_df.corr()
+        self.cm = self.pivot_record_df.corr()
         return self.cm
 
     # displays the correlation matrix cm as a heat map
     def heatMap(self, fsx = 8, fsy = 6):
         # correlation matrix
-        self.cm = self.record_df.corr()
+        self.cm = self.pivot_record_df.corr()
         # heatmap
         fig = plt.figure(figsize=(fsx, fsy))
         sns.heatmap(self.cm, annot=True, fmt=".2f", vmin=-1.0, vmax=+1.0, cmap='Spectral')
@@ -135,10 +130,11 @@ class AppleHealth:
     def pairPlot(self, pairPlotArgs, fsx = 12, fsy = 12, col = 'purple', lw = 1,):
         fig = plt.figure(figsize=(fsx, fsy))
 
-        g = sns.pairplot(self.record_df[pairPlotArgs],
+        g = sns.pairplot(self.pivot_record_df[pairPlotArgs],
                      kind='kde',
                      plot_kws=dict(fill=False, color=col, linewidths=lw),
-                     diag_kws=dict(fill=False, color=col, linewidth=lw))
+                     diag_kws=dict(fill=False, color=col, linewidth=lw),
+                     dropna=True)
 
         # add observation dots
         g.map_offdiag(sns.scatterplot, marker='.', color='black')
@@ -150,8 +146,8 @@ class AppleHealth:
 
     # returns the resampled chosen metric of the pivot record dataframe to a daily sum
     def dayOnDay(self, metric):
-        self.by_day = self.pivot_record_df[metric].resample('D').sum()
-        return self.by_day
+        by_day = self.pivot_record_df[metric].resample('D').sum()
+        return by_day
 
     # returns a monthly average of daily sum of chosen metric
     def means_by_month(self, metric):
@@ -166,24 +162,36 @@ class AppleHealth:
         plt.show()
 
     # writes all the records of workout_type and selected metrics to a csv file fname
-    def extractWorkoutType(self, workout_type, fname, metrics = ['duration', 'totalDistance', 'totalEnergyBurned']):
+    def extractWorkoutTypeToCsv(self, workout_type, fname, metrics = ['duration', 'totalDistance', 'totalEnergyBurned']):
         self.pivot_workout_df.loc[:,(metrics, workout_type)].to_csv(fname)
 
+    # returns a dataframe of workout_type and selected metrics
+    def extractWorkoutType(self, workout_type, metrics = ['duration', 'totalDistance', 'totalEnergyBurned']):
+        return self.pivot_workout_df.loc[:,(metrics, workout_type)]
+
     # writes all all workouts to a csv file fname
-    def extractAllWorkout(self, fname):
+    def extractAllWorkoutToCsv(self, fname):
         self.pivot_workout_df.to_csv(fname)
 
     # writes all all records to a csv file fname
-    def extractAllRecords(self, fname):
+    def extractAllRecordsToCsv(self, fname):
         self.pivot_record_df.to_csv(fname)
 
     # writes all specific records of record_type to a csv file fname
-    def extractRecordType(self, record_type, fname):
+    def extractRecordTypeToCsv(self, record_type, fname):
         self.pivot_record_df[record_type].to_csv(fname)
+
+    # returns all specific records of record_type
+    def extractRecordType(self, record_type):
+        return self.pivot_record_df[record_type]
 
     # generates sleep dataframe to store sleep analysis data
     def sleepRecord(self):
         self.sleep_df = self.pivot_record_df['SleepAnalysis']
+
+    def dropNullSleep(self, subset = None, thresh = 0.0, axis = 0, inplace=False):
+        return self.sleep_df.dropna(thresh  = int(thresh * len(self.sleep_df.index)), axis = axis , inplace = inplace, subset = subset)
+
 
     # displays a time series of daily sleep hours
     def sleepAnalysis(self, col = 'purple', lw = 1, fsx = 12, fsy = 4):
@@ -206,7 +214,7 @@ class AppleHealth:
     # investigate use case
     # TODO: Test
     def dropNullRecord(self, subset = None, thresh = 0.0, axis = 0, inplace=False):
-        print(int( 0.000001 * self.pivot_record_df.shape[0]))
+        # print(int( 0.000001 * self.pivot_record_df.shape[0]))
         return self.pivot_record_df.dropna(thresh  = int(thresh * len(self.pivot_record_df.index)), axis = axis , inplace = inplace, subset = subset)
 
     # compress records over period into 1 record by calculating mean of each record collected
@@ -247,3 +255,176 @@ class AppleHealth:
         print(time.tzinfo)
         print(self.pivot_record_df.index.tzinfo)
         return self.pivot_record_df.index[self.pivot_record_df.index.get_loc(time, method='nearest')].strftime('%Y-%m-%d %H:%M:%S')
+
+    # evaluate accuracy
+    def dropOutliers(self, thresh = 3):
+        self.pivot_record_df = self.pivot_record_df[(np.abs(stats.zscore(self.pivot_record_df, nan_policy='omit')) < thresh).all(axis=1)]
+
+    # evaluate use case
+    def zScoreRecords(self):
+        return (np.abs(stats.zscore(self.pivot_record_df.all(axis=1), nan_policy='omit')))
+
+    def describeRecords(self):
+        return self.pivot_record_df.describe()
+
+    def recordSummaryToCsv(self, fname):
+        self.pivot_record_df.describe().to_csv(fname)
+
+    def workoutSummaryToCsv(self, fname):
+        self.pivot_workout_df.describe().to_csv(fname)
+
+    def describeWorkouts(self):
+        return self.pivot_workout_df.describe()
+
+    def compareTimeFrames(self, startDate1, endDate1, startDate2, endDate2):
+        return [self.narrowRange(startDate1, endDate1).describe(), self.narrowRange(startDate2, endDate2).describe()]
+    
+    def bestWorkouts(self, workout_type, by, k = 10):
+        """ Finds the k best workouts of workout type
+
+        Args:
+            workout_type (String): Name/Title of workout
+            by (String): Metric to sort the worouts by
+            k (int, optional): number of workouts to return. Defaults to 10.
+
+        Returns:
+            Pd.Series: A pandas series of the best workouts
+        """
+        return self.pivot_workout_df[by][workout_type].sort_values(ascending=False)[:k]
+    
+    def worstWorkouts(self, workout_type, by, k = 10):
+        """ Finds the k worst workouts of workout type
+
+        Args:
+            workout_type (String): Name/Title of workout
+            by (String): Metric to sort the worouts by
+            k (int, optional): number of workouts to return. Defaults to 10.
+
+        Returns:
+            Pd.Series: A pandas series of the worst workouts
+        """
+        return self.pivot_workout_df[by][workout_type].sort_values()[:k]
+        
+
+    def labelRecord(self, record_type, labels, thresholds):
+        assert len(labels) == len(thresholds)
+        new = self.pivot_record_df[record_type].to_frame().assign(label='None').reset_index(drop=True)
+        for i in range(len(labels)): 
+            elemsIdx = np.where(np.logical_and(self.pivot_record_df[record_type] > thresholds[i][0], self.pivot_record_df[record_type] < thresholds[i][1]))
+            for ei in elemsIdx:
+                new.at[ei, 'label'] = labels[i]
+        return new       
+    
+    def labelWorkout(self, by, workout_type, labels, thresholds):
+        assert len(labels) == len(thresholds)
+        new = self.pivot_workout_df[by][workout_type].to_frame().assign(label='None').reset_index(drop=True)
+        for i in range(len(labels)): 
+            elemsIdx = np.where(np.logical_and(self.pivot_workout_df[by][workout_type] > thresholds[i][0], self.pivot_workout_df[by][workout_type] < thresholds[i][1]))
+            for ei in elemsIdx:
+                new.at[ei, 'label'] = labels[i]
+        return new 
+    
+    def calculateDaysBetweenDates(self, begin, end):
+        return (end - begin).days
+    
+    def findRecordbyDate(self, date):
+        return self.pivot_record_df[self.pivot_record_df.index[self.pivot_record_df.index.get_loc(date, method='nearest')].strftime('%Y-%m-%d')]
+    
+    def findWorkoutbyDate(self, date):
+        return self.pivot_workout_df[self.pivot_workout_df.index[self.pivot_workout_df.index.get_loc(date, method='nearest')].strftime('%Y-%m-%d')]
+    
+    def findBestWorkoutsbyDate(self, date, k = 10):
+        return self.findWorkoutbyDate(date).sort_values(by=['totalEnergyBurned', 'totalDistance'], ascending=False)[:k]
+    
+    def findWorstWorkoutsbyDate(self, date, k = 10):
+        return self.findWorkoutbyDate(date).sort_values(by=['totalEnergyBurned', 'totalDistance'])[:k]
+    
+    def findBestRecordsbyDate(self, date, k = 10):
+        return self.findRecordbyDate(date).sort_values(by=['totalEnergyBurned', 'totalDistance'], ascending=False)[:k]
+    
+    def findWorstRecordsbyDate(self, date, k = 10):
+        return self.findRecordbyDate(date).sort_values(by=['totalEnergyBurned', 'totalDistance'])[:k]
+    
+    def findBestWorkoutsbyTime(self, time, k = 10):
+        return self.findWorkoutbyTime(time).sort_values(by=['totalEnergyBurned', 'totalDistance'], ascending=False)[:k]
+    
+    def findWorstWorkoutsbyTime(self, time, k = 10):
+        return self.findWorkoutbyTime(time).sort_values(by=['totalEnergyBurned', 'totalDistance'])[:k]
+    
+    def calculateWorkoutDuration(self, workout_type):
+        return self.pivot_workout_df['duration'][workout_type].sum()
+    
+    def calculateRecordDuration(self, record_type):
+        return self.pivot_record_df['duration'][record_type].sum()
+    
+    def calculateWorkoutDistance(self, workout_type):
+        return self.pivot_workout_df['totalDistance'][workout_type].sum()
+    
+    def calculateRecordDistance(self, record_type):
+        return self.pivot_record_df['totalDistance'][record_type].sum()
+    
+    def dailyWorkoutSummary(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].resample('D').sum()
+    
+    def dailyRecordSummary(self, record_type):
+        return self.pivot_record_df['totalEnergyBurned'][record_type].resample('D').sum()
+    
+    def returnWorkoutSummary(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].describe()
+    
+    def barGraphWorkoutSummary(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].describe().to_frame().T
+    
+    def timeSeriesWorkoutSummary(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].resample('D').sum()
+    
+    def plotWorkoutSummary(self, workout_type):
+        self.pivot_workout_df['totalEnergyBurned'][workout_type].resample('D').sum().plot(kind='bar')
+        plt.show()
+        
+    def plotDailyDistance(self, workout_type):
+        self.pivot_workout_df['totalDistance'][workout_type].resample('D').sum().plot(kind='bar')
+        plt.show()
+        
+    def plotDailyDuration(self, workout_type):
+        self.pivot_workout_df['duration'][workout_type].resample('D').sum().plot(kind='bar')
+        plt.show()
+        
+    def calculateDailyDuration(self, workout_type):
+        return self.pivot_workout_df['duration'][workout_type].resample('D').sum()
+    
+    def probabilityDistribution(self, workout_type, by):
+        return self.pivot_workout_df[by][workout_type].value_counts(normalize=True)
+    
+    def binomialProbabilityDistribution(self, workout_type, by, n):
+        return self.pivot_workout_df[by][workout_type].value_counts(normalize=True).cumsum()
+    
+    def predictWorkout(self, workout_type, by, n):
+        return self.pivot_workout_df[by][workout_type].value_counts(normalize=True).cumsum().index[n]
+    
+    def predictRecord(self, record_type, by, n):
+        return self.pivot_record_df[by][record_type].value_counts(normalize=True).cumsum().index[n]
+    
+    def predictDaybasedOnWorkout(self, workout_type, by, n):
+        return self.pivot_workout_df[by][workout_type].value_counts(normalize=True).cumsum().index[n]
+    
+    def sortWorkoutsbyDuration(self, workout_type):
+        return self.pivot_workout_df['duration'][workout_type].sort_values(ascending=False)
+    
+    def sortWorkoutsbyEnergy(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].sort_values(ascending=False)
+    
+    def sortWorkoutsbyDistance(self, workout_type):
+        return self.pivot_workout_df['totalDistance'][workout_type].sort_values(ascending=False)
+    
+    def sortSleepbyDuration(self, sleep_type):
+        return self.pivot_sleep_df['duration'][sleep_type].sort_values(ascending=False)
+    
+    def createSleepSummary(self, sleep_type):
+        return self.pivot_sleep_df['totalEnergyBurned'][sleep_type].describe()
+    
+    def compareworkouts(self, workout_type1, workout_type2):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type1].describe().to_frame().T.join(self.pivot_workout_df['totalEnergyBurned'][workout_type2].describe().to_frame().T)
+    
+    def pieChart(self, workout_type):
+        return self.pivot_workout_df['totalEnergyBurned'][workout_type].value_counts(normalize=True).plot(kind='pie', autopct='%1.1f%%')
