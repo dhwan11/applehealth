@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 import pytz
 from scipy import stats
+from os.path import exists
 # an instance of apple Health
 # fname is the name of data file to be parsed must be an XML files
 # flags for cache
@@ -15,12 +16,17 @@ class AppleHealth:
     def __init__(self, fname = 'export.xml', pivotIndex = 'endDate', readCache = False, writeCache = False):
         #check cache flag and cache accordingly
         if readCache:
-            self.readCache()
+            a = time.time()
+            self.readCache(fname)
+            e = time.time()
+            self.runtime = e-a
+            print("Cache parsing Time = {}".format(e-a))
             if writeCache:
-                self.cacheAll()
+                self.cacheAll(fname)
             return
 
         # create element tree object
+        a = time.time()
         s = time.time()
         tree = ET.parse(fname)
         e = time.time()
@@ -51,16 +57,18 @@ class AppleHealth:
         s = time.time()
         for col in ['creationDate', 'startDate', 'endDate']:
             self.record_data[col] = pd.to_datetime(self.record_data[col], format=format)
-            self.workout_data[col] = pd.to_datetime(self.workout_data[col], format=format)
+            if not self.workout_data.empty:
+                self.workout_data[col] = pd.to_datetime(self.workout_data[col], format=format)
         e = time.time()
         print("date conv Time = {}".format(e-s))
-
+        
         s = time.time()
-        # value is numeric, NaN if fails
+        # value is numeric, NaN if fails]
         self.record_data['value'] = pd.to_numeric(self.record_data['value'], errors='coerce')
-        self.workout_data['duration'] = pd.to_numeric(self.workout_data['duration'], errors='coerce')
-        self.workout_data['totalDistance'] = pd.to_numeric(self.workout_data['totalDistance'], errors='coerce')
-        self.workout_data['totalEnergyBurned'] = pd.to_numeric(self.workout_data['totalEnergyBurned'], errors='coerce')
+        if not self.workout_data.empty:
+            self.workout_data['duration'] = pd.to_numeric(self.workout_data['duration'], errors='coerce')
+            self.workout_data['totalDistance'] = pd.to_numeric(self.workout_data['totalDistance'], errors='coerce')
+            self.workout_data['totalEnergyBurned'] = pd.to_numeric(self.workout_data['totalEnergyBurned'], errors='coerce')
 
         # some records do not measure anything, just count occurences
         # filling with 1.0 (= one time) makes it easier to aggregate
@@ -69,19 +77,23 @@ class AppleHealth:
         # shorter observation names: use vectorized replace function
         self.record_data['type'] = self.record_data['type'].str.replace('HKQuantityTypeIdentifier', '')
         self.record_data['type'] = self.record_data['type'].str.replace('HKCategoryTypeIdentifier', '')
-        self.workout_data['workoutActivityType'] = self.workout_data['workoutActivityType'].str.replace('HKWorkoutActivityType', '')
+        if not self.workout_data.empty:
+            self.workout_data['workoutActivityType'] = self.workout_data['workoutActivityType'].str.replace('HKWorkoutActivityType', '')
         e = time.time()
         print("rest Time = {}".format(e-s))
 
         # pivot
         s = time.time()
         self.pivot_record_df = self.record_data.pivot_table(index='endDate', columns='type', values='value')
-        self.pivot_workout_df = self.workout_data.pivot_table(index='endDate', columns='workoutActivityType', values=['duration', 'totalDistance', 'totalEnergyBurned'])
+        self.pivot_workout_df = None
+        if not self.workout_data.empty:
+            self.pivot_workout_df = self.workout_data.pivot_table(index='endDate', columns='workoutActivityType', values=['duration', 'totalDistance', 'totalEnergyBurned'])
         e = time.time()
         print("pivot Time = {}".format(e-s))
-
+        print("total Time = {}".format(e-a))
         if writeCache:
-            self.cacheAll()
+            self.cacheAll(fname)
+        self.runtime = e-a
 
     # resample the record dataframe to period and perform calculations to metrics listed in dict
     def resampleRecords(self, resampDict, period = 'D'):
@@ -159,6 +171,13 @@ class AppleHealth:
     # displays a monthly bar graph of daily average of metric
     def monthlyBar(self, metric):
         self.means_by_month(metric).plot(kind='bar')
+        plt.ylabel("Daily average of distance Walking/Running in Miles")
+        plt.xlabel("Month")
+        plt.tight_layout()
+        plt.show()
+        
+    def dailyBar(self, metric):
+        self.dayOnDay(metric).plot(kind='bar')
         plt.show()
 
     # writes all the records of workout_type and selected metrics to a csv file fname
@@ -172,10 +191,40 @@ class AppleHealth:
     # writes all all workouts to a csv file fname
     def extractAllWorkoutToCsv(self, fname):
         self.pivot_workout_df.to_csv(fname)
+        
+    def extractAllWorkoutstoXlsx(self, fname):
+        self.pivot_workout_df.to_excel(fname)
+        
+    def extractAllWorkoutsToJson(self, fname):
+        self.pivot_workout_df.to_json(fname)
+        
+    def extractAllWorkoutsToHtml(self, fname):
+        self.pivot_workout_df.to_html(fname)
+        
+    def extractAllWorkoutsToSql(self, fname):
+        self.pivot_workout_df.to_sql(fname)
+        
+    def extractAllWorkoutsToXMl(self, fname):
+        self.pivot_workout_df.to_xml(fname)
 
     # writes all all records to a csv file fname
     def extractAllRecordsToCsv(self, fname):
         self.pivot_record_df.to_csv(fname)
+    
+    def extractAllRecordsToXlsx(self, fname):
+        self.pivot_record_df.to_excel(fname)
+        
+    def extractAllRecordsToJson(self, fname):
+        self.pivot_record_df.to_json(fname)
+        
+    def extractAllRecordsToHtml(self, fname):
+        self.pivot_record_df.to_html(fname)
+        
+    def extractAllRecordsToSql(self, fname):
+        self.pivot_record_df.to_sql(fname)
+        
+    def extractAllRecordsToXMl(self, fname):
+        self.pivot_record_df.to_xml(fname)
 
     # writes all specific records of record_type to a csv file fname
     def extractRecordTypeToCsv(self, record_type, fname):
@@ -192,7 +241,6 @@ class AppleHealth:
     def dropNullSleep(self, subset = None, thresh = 0.0, axis = 0, inplace=False):
         return self.sleep_df.dropna(thresh  = int(thresh * len(self.sleep_df.index)), axis = axis , inplace = inplace, subset = subset)
 
-
     # displays a time series of daily sleep hours
     def sleepAnalysis(self, col = 'purple', lw = 1, fsx = 12, fsy = 4):
         fig = plt.figure(figsize=(fsx,fsy))
@@ -201,15 +249,23 @@ class AppleHealth:
 
     # writes pivot record and workout dataframe to pkl files of associated names
     # TODO: Error handling
-    def cacheAll(self):
-        self.pivot_record_df.to_pickle('cached_pivot_record_df.pkl')
-        self.pivot_workout_df.to_pickle('cached_pivot_workout_df.pkl')
+    def cacheAll(self, fname = "cached_pivot_"):
+        print("Caching pivot record dataframe")
+        self.pivot_record_df.to_pickle('{}record_df.pkl'.format(fname))
+        if self.pivot_workout_df is not None:
+            self.pivot_workout_df.to_pickle('{}workout_df.pkl'.format(fname))
 
     # reads cache to populate record dataframe and workout dataframe
     # TODO: Error handling
-    def readCache(self):
-        self.pivot_record_df = pd.read_pickle('cached_pivot_record_df.pkl')
-        self.pivot_workout_df = pd.read_pickle('cached_pivot_workout_df.pkl')
+    def readCache(self, fname = "cached_pivot_"):
+        if exists('{}record_df.pkl'.format(fname)):
+            self.pivot_record_df = pd.read_pickle('{}record_df.pkl'.format(fname))
+        else: print("cache not found")
+        if exists('{}workout_df.pkl'.format(fname)):
+            self.pivot_workout_df = pd.read_pickle('{}workout_df.pkl'.format(fname))
+        else:
+            self.pivot_workout_df = None 
+            print("cache not found")
 
     # investigate use case
     # TODO: Test
@@ -305,7 +361,6 @@ class AppleHealth:
         """
         return self.pivot_workout_df[by][workout_type].sort_values()[:k]
         
-
     def labelRecord(self, record_type, labels, thresholds):
         assert len(labels) == len(thresholds)
         new = self.pivot_record_df[record_type].to_frame().assign(label='None').reset_index(drop=True)
@@ -390,7 +445,7 @@ class AppleHealth:
         self.pivot_workout_df['duration'][workout_type].resample('D').sum().plot(kind='bar')
         plt.show()
         
-    def calculateDailyDuration(self, workout_type):
+    def calculateDailyWorkoutDuration(self, workout_type):
         return self.pivot_workout_df['duration'][workout_type].resample('D').sum()
     
     def probabilityDistribution(self, workout_type, by):
@@ -428,3 +483,9 @@ class AppleHealth:
     
     def pieChart(self, workout_type):
         return self.pivot_workout_df['totalEnergyBurned'][workout_type].value_counts(normalize=True).plot(kind='pie', autopct='%1.1f%%')
+    
+    def findWorkoutDataOutsideOfRange(self, workout_type, by, min, max):
+        return self.pivot_workout_df[by][workout_type].loc[(self.pivot_workout_df[by][workout_type] < min) | (self.pivot_workout_df[by][workout_type] > max)]
+    
+    def findRecordDataOutsideOfRange(self, record_type, by, min, max):
+        return self.pivot_record_df[by][record_type].loc[(self.pivot_record_df[by][record_type] < min) | (self.pivot_record_df[by][record_type] > max)]
